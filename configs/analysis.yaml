@@ -1,0 +1,41 @@
+# Statistical analysis settings shared by the scripts in analysis/.
+seed: 20261002
+n_boot: 2000              # patient-level bootstrap replicates for headline estimates
+n_boot_secondary: 1000    # subgroup, threshold, R², and secondary estimates
+
+score:
+  log_floor_longitudinal: 0.001   # log(PanAdipo) floor in the longitudinal models
+  log_floor_mesa: 0.0001          # log(PanAdipo) floor in the MESA models
+
+views:
+  # standard on-axis acquisitions of each view (PanEcho view-classifier classes); used for view-specific scores
+  standard:
+    PLAX: [plax_plax]
+    PSAX: [psax_avz, psax_pap, psax_mv, psax_apex]
+    A2C: [a2c]
+    A3C: [a3c]
+    A4C: [a4c]
+    A5C: [a5c]
+    Subcostal: [subcostal]
+  # on-axis PLAX, mid-papillary PSAX, and A4C; also the views scored in POCUS
+  key: [plax_plax, psax_pap, a4c]
+
+ct:
+  max_interval_days: 365
+  close_interval_days: [90, 30]
+  age_groups: [50, 65]            # <50, 50-64, >=65 years
+  bmi_groups: [25, 30]            # <25, 25-<30, >=30 kg/m²
+  min_group_n: 50                 # smaller race and ethnicity groups are combined with "Other or unknown"
+  high_eat_percentile: 0.95       # within age-sex groups
+  heart_volume_ml: [200, 1500]    # plausible total heart volume
+  min_structure_ml: 10            # every cardiac structure must be at least this large
+
+mesa:
+  lean_bmi: 25
+
+longitudinal:
+  landmarks_days: [30, 90, 365]
+  primary_landmark_days: 90
+  max_followup_years: 5
+  mi_imputations: 20
+  delta_c_boot: 1000

@@ -1,0 +1,37 @@
+# PanAdipo fine-tuning settings (Methods, "Model architecture and fine-tuning"; Supplemental Methods).
+# Every key matches a command-line flag of `python -m panadipo.train`; flags given on the command line override this file.
+#
+# Early stopping is configurable:
+#   monitor:  validation metric used for early stopping, checkpoint selection, and the learning-rate scheduler
+#             (auprc or auroc)
+#   patience: epochs without improvement before training stops (e.g., 5 or 7)
+# Examples:
+#   torchrun --nproc_per_node 6 -m panadipo.train --config configs/train.yaml ...                        # AUPRC, patience 5
+#   torchrun --nproc_per_node 6 -m panadipo.train --config configs/train.yaml --monitor auroc --patience 7 ...
+
+# data
+clip_len: 16               # frames sampled evenly from each clip
+frame_size: 224
+num_workers: 8
+
+# optimization
+per_gpu_batch: 24          # x 6 GPUs = effective batch 144
+head_lr: 1.0e-4            # classification head
+backbone_lr_divisor: 10    # backbone learning rate = head_lr / 10 (backbone unfrozen)
+weight_decay: 1.0e-4
+dropout: 0.3
+pos_weight: 15             # positive-class weight in the binary cross-entropy loss (no oversampling)
+amp: true                  # mixed precision
+augment: true              # zoom-out, random crop, horizontal flip, rotation (training only)
+
+# learning-rate schedule: reduce 10-fold after 3 epochs without improvement in the monitored metric
+reduce_lr_patience: 3
+reduce_lr_factor: 0.1
+min_lr: 1.0e-7
+
+# stopping
+epochs: 50                 # maximum number of epochs
+monitor: auprc             # auprc | auroc
+patience: 5                # e.g., 5-7
+
+seed: 20260401

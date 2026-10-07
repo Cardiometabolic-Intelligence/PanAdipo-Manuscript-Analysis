@@ -1,0 +1,16 @@
+# no data, model weights, or results in this repository
+data/
+example_data/
+results/
+*.pt
+*.pth
+*.avi
+*.dcm
+*.parquet
+*.csv
+!docs/*.csv
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
