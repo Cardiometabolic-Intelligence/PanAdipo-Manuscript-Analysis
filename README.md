@@ -108,7 +108,7 @@ calibrated probability and is analyzed as a continuous score. Model weights will
 | Multivariable comparators; Supplemental Table 4 | `analysis/04_comparators.py` | `supp_table4_comparators` |
 | CT depot correlations, partial correlations, subgroups, R²; Figures 2B, 3A, 3B; Supplemental Tables 5-6; Supplemental Figure 2 | `analysis/05_ct_correlations.py` | `figure2b_ct_correlations`, `supp_table5_ct_depots`, `supp_table6_strata`, `figure3a_r2`, `supp_figure2_interval` |
 | Age- and sex-specific high EAT; Supplemental Table 7 | `analysis/06_ct_high_eat.py` | `supp_table7_high_eat` |
-| MESA biomarkers; Figure 4; Supplemental Table 8 | `analysis/07_mesa.py` | `figure4_mesa_biomarkers` |
+| MESA biomarkers (M1-M4); Figure 4; Supplemental Table 8; Central Illustration (MESA panel) | `analysis/07_mesa.py` | `figure4_mesa_biomarkers` |
 | Newly documented disease and mortality; Figure 5; Supplemental Tables 9-11; Supplemental Figure 3 | `analysis/08_incident_disease.py` | `supp_table9_pooled`, `supp_table9_cohorts`, `supp_table10_sensitivity`, `supp_table11_mortality`, `supp_figure3_flow`, `model_checks` |
 | Incremental C-statistic for MASLD/MASH; Supplemental Table 10 (continued) | `analysis/09_incremental_c.py` | `supp_table10_delta_c` |
 | Grad-CAM++ maps; Figures 1A, 2A; Supplemental Figure 4 | `python -m panadipo.gradcam` | PNG strips and map arrays |

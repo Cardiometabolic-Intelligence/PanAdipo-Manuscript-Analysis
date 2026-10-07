@@ -78,6 +78,8 @@ def ct_pairs(rng, n=2500):
                  interval_days=rng.integers(-365, 366, n), development=rng.random(n) < 0.06,
                  echo_date=pd.Timestamp("2018-01-01") + pd.to_timedelta(rng.integers(0, 2500, n), unit="D"))
     d["eat_median_hu"] = d["eat_mean_hu"] - 3
+    d["age_at_echo"] = d["age"] + d["interval_days"] / 365.25
+    d["bmi_at_echo"] = d["bmi"].where(rng.random(n) > 0.05)
     d["eat_fraction_pericardium"] = d["eat_volume"] / d["pericardium_volume"]
     d["paracardial_fraction_mediastinum"] = np.clip(0.3 + 0.03 * z + rng.normal(0, 0.05, n), 0, 1)
     extra = d.sample(frac=0.1, random_state=1).assign(interval_days=lambda x: rng.integers(-365, 366, len(x)))

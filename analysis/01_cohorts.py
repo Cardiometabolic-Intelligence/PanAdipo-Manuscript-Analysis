@@ -54,7 +54,10 @@ def main() -> None:
     cols = {lab: describe(d) for lab, d in cohorts.items()}
     if io.exists(a.data, "ct_pairs"):
         prim = ct.primary_sample(io.read(a.data, "ct_pairs"), cfg["ct"]["max_interval_days"])
-        cols["YNHHS TTE-CCTA"] = describe(prim.rename(columns={"echo_date": "index_date"}))
+        # as in the other YNHHS cohorts: age at the echocardiogram and BMI within ±365 days of it
+        prim = prim.drop(columns=[c for c in ("age", "bmi") if f"{c}_at_echo" in prim])
+        prim = prim.rename(columns={"echo_date": "index_date", "age_at_echo": "age", "bmi_at_echo": "bmi"})
+        cols["YNHHS TTE-CCTA"] = describe(prim)
     io.write(pd.DataFrame(cols).rename_axis("Characteristic").reset_index(), a.out, "table1")
 
     rows, rho = [], []

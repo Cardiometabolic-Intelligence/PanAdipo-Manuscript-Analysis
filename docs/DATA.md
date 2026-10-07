@@ -42,7 +42,9 @@ pairs within 365 days, patients outside model development, one pair per patient)
 | `interval_days` | echocardiogram date minus CCTA date (days) |
 | `development` | True if the patient contributed to model training or validation |
 | `score` | study score (mean of all clip outputs) |
-| `age`, `female`, `bmi`, `race_ethnicity` | at the CCTA |
+| `age`, `female`, `bmi`, `race_ethnicity` | at the CCTA (used in the CT analyses) |
+| `age_at_echo`, `bmi_at_echo` | optional: age at the echocardiogram and BMI within ±365 days of it (used in Table 1, as in the other YNHHS cohorts) |
+| `<condition>_date` | optional first diagnosis dates for the Table 1 conditions (prevalent if on or before `echo_date`) |
 | `echo_vendor`, `ct_scanner`, `kvp` | from DICOM headers (manufacturer, scanner model, tube voltage) |
 | `effusion` | pericardial effusion in the echocardiography report: `none_trace`, `present`, or empty (`panadipo.labels.pericardial_effusion`) |
 | BOA measures | see below |
