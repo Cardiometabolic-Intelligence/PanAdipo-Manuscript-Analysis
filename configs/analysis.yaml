@@ -38,4 +38,7 @@ longitudinal:
   primary_landmark_days: 90
   max_followup_years: 5
   mi_imputations: 20
+  # imputation model additionally includes baseline hypertension, hyperlipidemia, and heart failure and healthcare
+  # contact in the year before the index study (second revision)
+  mi_extended: true
   delta_c_boot: 1000

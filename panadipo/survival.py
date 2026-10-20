@@ -2,7 +2,10 @@
 
 Cohort tables have one row per patient (index = earliest echocardiogram) with: patient_id, index_date, score (study
 score), age, female, bmi, race_ethnicity, death_date, last_known_date (optional; last recorded contact), the first
-diagnosis date of each endpoint (<endpoint>_date; see panadipo.outcomes), and optionally alcohol_excluded (MIMIC-IV).
+diagnosis date of each endpoint (<endpoint>_date; see panadipo.outcomes), alcohol_excluded, and optionally
+contact_days_1y (healthcare contact in the year before the index study), bmi_days (BMI date minus index date), and
+bmi_pre_index (BMI at or before the index study). Records without EHR linkage (no age or sex: no diagnoses or BMI)
+are removed with `linked` before the exposure is standardized.
 
 Design: patients with the endpoint on or before the index date are excluded (all available history); follow-up ends
 at the outcome, death (censored: cause-specific hazards), last recorded contact, 5 years, or the end of data;
@@ -32,6 +35,12 @@ ADJUSTMENTS = {"Age, sex": AGE_SEX, "Age, sex, BMI": AGE_SEX_BMI}
 FINE_GRAY_R = Path(__file__).with_name("fine_gray.R")
 
 
+def linked(df: pd.DataFrame) -> pd.DataFrame:
+    """Records linked to the EHR (age and sex available); unlinked records have no diagnoses or BMI and are excluded
+    from the longitudinal analyses and the Table 1 characteristics as part of quality control."""
+    return df[df["age"].notna() & df["female"].notna()].reset_index(drop=True)
+
+
 def add_exposure(df: pd.DataFrame, floor: float = 1e-3) -> pd.DataFrame:
     """log(score) floored at `floor`, standardized within the cohort (per SD of log[PanAdipo])."""
     lp = np.log(pd.to_numeric(df["score"], errors="coerce").clip(lower=floor, upper=1 - 1e-6))
@@ -50,7 +59,7 @@ def at_risk(df: pd.DataFrame, endpoint: str, max_years: float = 5, admin_date=No
     """
     d = df.copy()
     d["index_date"] = _dates(d, "index_date")
-    if endpoint == "masld" and "alcohol_excluded" in d:
+    if endpoint == "masld" and "alcohol_excluded" in d:                 # alcohol-related codes at any time
         d = d[~d["alcohol_excluded"].fillna(False).astype(bool)]
     outcome = _dates(d, "death_date" if endpoint == "death" else f"{endpoint}_date")
     d = d[~(outcome <= d["index_date"])].copy()                        # prevalent disease excluded
@@ -120,14 +129,51 @@ def fine_gray(d: pd.DataFrame, covs: list[str]) -> dict:
             "logHR": b, "se": se, "HR": np.exp(b), "lo": np.exp(b - 1.96 * se), "hi": np.exp(b + 1.96 * se)}
 
 
+def one_stage_cox(sets: dict[str, pd.DataFrame], covs: list[str], system: dict[str, str] | None = None) -> dict:
+    """Cox model on the stacked cohorts with cohort-specific baseline hazards (strata) and robust variance clustered on
+    the participant; `system` maps cohort -> identifier namespace (patients of cohorts in the same health system share
+    an identifier, e.g., YNHHS TTE and POCUS). HR per SD of log(PanAdipo), standardized within each cohort."""
+    system = system or {c: c.split()[0] for c in sets}
+    parts = []
+    for c, d in sets.items():
+        x = d[["patient_id", "time_years", "event", EXPOSURE] + covs].dropna()
+        parts.append(x[x["time_years"] > 0].assign(stratum=c, pid=system[c] + ":" + x["patient_id"].astype(str)))
+    s = pd.concat(parts, ignore_index=True).drop(columns="patient_id")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        r = CoxPHFitter().fit(s, "time_years", "event", strata=["stratum"], cluster_col="pid",
+                              robust=True).summary.loc[EXPOSURE]
+    return {"n": len(s), "events": int(s["event"].sum()), "participants": s["pid"].nunique(),
+            "logHR": float(r["coef"]), "se": float(r["se(coef)"]), "HR": float(r["exp(coef)"]),
+            "lo": float(r["exp(coef) lower 95%"]), "hi": float(r["exp(coef) upper 95%"]), "p": float(r["p"])}
+
+
 # ----------------------------------------------------------------------------- missing BMI
-def impute_bmi(d: pd.DataFrame, m: int, rng: np.random.Generator) -> list[pd.Series]:
-    """Multiple imputation of missing BMI: m draws from a Bayesian linear regression of log(BMI) on age, sex,
-    log(PanAdipo), the event indicator, the Nelson-Aalen cumulative hazard, and race and ethnicity (BMI is the only
-    incomplete variable, so chained equations reduce to this single model)."""
+BASELINE = {"base_htn": "htn_date", "base_hld": "hld_date", "base_hf": "heart_failure_date"}
+
+
+def imputation_predictors(d: pd.DataFrame, extended: bool = True) -> pd.DataFrame:
+    """Age, sex, log(PanAdipo), event, and race and ethnicity; with `extended`, also baseline hypertension,
+    hyperlipidemia, and heart failure (diagnosis on or before the index study) and log(1 + days with healthcare contact
+    in the prior year), when the columns are available."""
+    X = d[["age", "female", EXPOSURE, "event", "race_ethnicity"]].copy()
+    if extended:
+        idx = pd.to_datetime(d["index_date"])
+        for k, col in BASELINE.items():
+            if col in d:
+                X[k] = (pd.to_datetime(d[col], errors="coerce") <= idx).astype(float)
+        if "contact_days_1y" in d:
+            X["log_contact"] = np.log1p(pd.to_numeric(d["contact_days_1y"], errors="coerce").fillna(0))
+    return X[[c for c in X if c == "race_ethnicity" or X[c].nunique() > 1]]
+
+
+def impute_bmi(d: pd.DataFrame, m: int, rng: np.random.Generator, extended: bool = True) -> list[pd.Series]:
+    """Multiple imputation of missing BMI: m draws from a Bayesian linear regression of log(BMI) on the imputation
+    predictors (`imputation_predictors`) and the Nelson-Aalen cumulative hazard (BMI is the only incomplete variable,
+    so chained equations reduce to this single model)."""
     na = NelsonAalenFitter().fit(d["time_years"], d["event"]).cumulative_hazard_at_times(d["time_years"]).values
-    X = pd.get_dummies(d[["age", "female", EXPOSURE, "event", "race_ethnicity"]].assign(na=na),
-                       columns=["race_ethnicity"], drop_first=True, dtype=float)
+    X = pd.get_dummies(imputation_predictors(d, extended).assign(na=na), columns=["race_ethnicity"], drop_first=True,
+                       dtype=float)
     X.insert(0, "const", 1.0)
     obs = d["bmi"].notna().values
     y, Xo, Xm = np.log(d.loc[obs, "bmi"].values), X.values[obs], X.values[~obs]

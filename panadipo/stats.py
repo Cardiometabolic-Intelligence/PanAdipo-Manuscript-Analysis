@@ -1,5 +1,5 @@
 """Statistical helpers: patient-level (cluster) bootstrap, discrimination, Spearman and partial Spearman correlation,
-Holm adjustment, and Youden thresholds."""
+Holm adjustment, Youden thresholds with Wilson intervals, and agreement (ICC, Bland-Altman)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats as st
 from sklearn.metrics import average_precision_score, roc_auc_score, roc_curve
+from statsmodels.stats.proportion import proportion_confint
 
 
 # ----------------------------------------------------------------------------- bootstrap
@@ -59,6 +60,41 @@ def operating_point(y, s, thr: float) -> dict:
     div = lambda a, b: a / b if b else np.nan  # noqa: E731
     return {"sensitivity": div(tp, tp + fn), "specificity": div(tn, tn + fp), "ppv": div(tp, tp + fp),
             "npv": div(tn, tn + fn)}
+
+
+def confusion(y, s, thr: float) -> dict:
+    """TP, FP, FN, TN at `thr`, with sensitivity, specificity, PPV, and NPV and their Wilson 95% CIs."""
+    y, pos = np.asarray(y).astype(int), np.asarray(s) >= thr
+    c = {"tp": int((pos & (y == 1)).sum()), "fp": int((pos & (y == 0)).sum()), "fn": int((~pos & (y == 1)).sum()),
+         "tn": int((~pos & (y == 0)).sum())}
+    for name, k, n in (("sensitivity", c["tp"], c["tp"] + c["fn"]), ("specificity", c["tn"], c["tn"] + c["fp"]),
+                       ("ppv", c["tp"], c["tp"] + c["fp"]), ("npv", c["tn"], c["tn"] + c["fn"])):
+        lo, hi = proportion_confint(k, n, method="wilson") if n else (np.nan, np.nan)
+        c.update({name: k / n if n else np.nan, f"{name}_lo": float(lo), f"{name}_hi": float(hi)})
+    return c
+
+
+# ----------------------------------------------------------------------------- agreement
+def icc_2_1(a, b) -> float:
+    """Two-way random-effects, absolute-agreement, single-measure ICC(2,1)."""
+    x = np.column_stack([a, b]).astype(float)
+    x = x[np.isfinite(x).all(axis=1)]
+    n, k = x.shape
+    if n < 3:
+        return np.nan
+    gm = x.mean()
+    msr = k * ((x.mean(axis=1) - gm) ** 2).sum() / (n - 1)
+    msc = n * ((x.mean(axis=0) - gm) ** 2).sum() / (k - 1)
+    mse = ((x - x.mean(axis=1, keepdims=True) - x.mean(axis=0, keepdims=True) + gm) ** 2).sum() / ((n - 1) * (k - 1))
+    return float((msr - mse) / (msr + (k - 1) * mse + k * (msc - mse) / n))
+
+
+def bland_altman(a, b) -> dict:
+    """Mean difference (a - b) and 95% limits of agreement."""
+    d = np.asarray(a, float) - np.asarray(b, float)
+    d = d[np.isfinite(d)]
+    m, sd = d.mean(), d.std(ddof=1)
+    return {"bias": float(m), "loa_low": float(m - 1.96 * sd), "loa_high": float(m + 1.96 * sd), "n": len(d)}
 
 
 # ----------------------------------------------------------------------------- correlation

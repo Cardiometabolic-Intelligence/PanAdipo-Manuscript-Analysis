@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import stats as st
 
 from panadipo import ct, labels, meta, outcomes, stats
 from panadipo import survival as sv
@@ -70,3 +71,30 @@ def test_heart_index_and_high_eat():
     assert np.isnan(out["eat_volume_heart_indexed"].iloc[1])               # structure <10 mL: implausible
     g = pd.DataFrame({"age": [40] * 20, "female": [1] * 20, "eat_volume_heart_indexed": np.arange(20.0)})
     assert ct.high_eat(g).sum() == 1
+
+
+def test_hksj_never_narrower_than_reml():
+    y, se = np.log([1.2, 1.25, 1.22]), np.array([0.1, 0.2, 0.15])         # homogeneous: q* < 1, truncated at 1
+    p = meta.pool(y, se)
+    t = st.t.ppf(0.975, 2)
+    assert p["HKSJ_hi"] == pytest.approx(np.exp(p["logHR"] + t * p["se"]))
+    assert p["HKSJ_lo"] < p["lo"] and p["HKSJ_hi"] > p["hi"]
+
+
+def test_icc_and_wilson():
+    a = np.arange(10.0)
+    assert stats.icc_2_1(a, a) == pytest.approx(1.0)
+    assert stats.icc_2_1(a, a + 5) < 0.6                                   # absolute agreement penalizes bias
+    c = stats.confusion([1, 1, 0, 0], [0.9, 0.2, 0.8, 0.1], 0.5)
+    assert (c["tp"], c["fp"], c["fn"], c["tn"]) == (1, 1, 1, 1)
+    assert c["sensitivity_lo"] < 0.5 < c["sensitivity_hi"]
+
+
+def test_linked_records_and_bsa_index():
+    d = pd.DataFrame({"age": [60, np.nan, 70], "female": [1, 0, np.nan]})
+    assert len(sv.linked(d)) == 1
+    out = ct.add_derived(pd.DataFrame({"eat_volume": [100.0], "paracardial_volume": [50.0], "myocardium_volume": [120],
+                                       "lv_volume": [150], "rv_volume": [150], "la_volume": [80], "ra_volume": [100],
+                                       "bsa": [2.0]}))
+    assert out["eat_volume_bsa_indexed"].iloc[0] == pytest.approx(50.0)
+    assert out["heart_volume"].iloc[0] == pytest.approx(600.0)

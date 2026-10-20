@@ -1,5 +1,5 @@
 """Random-effects meta-analysis of cohort-specific log hazard ratios: restricted maximum likelihood (REML) tau²,
-Cochran Q, and I² with a Q-profile confidence interval."""
+Cochran Q, I² with a Q-profile confidence interval, and the modified Hartung-Knapp-Sidik-Jonkman (HKSJ) interval."""
 
 from __future__ import annotations
 
@@ -40,11 +40,22 @@ def i2_ci(y, v, level: float = 0.95) -> tuple[float, float]:
         return (w * (y - mu) ** 2).sum()
 
     upper = 100 * (np.var(y, ddof=1) + v.max()) + 1
-    solve = lambda crit: 0.0 if q(0) < crit else optimize.brentq(lambda t: q(t) - crit, 0, upper)  # noqa: E731
+
+    def solve(crit):
+        if q(0) < crit:
+            return 0.0
+        hi = upper
+        for _ in range(60):                     # widen the bracket when the critical value is tiny (two cohorts)
+            if q(hi) < crit:
+                return optimize.brentq(lambda t: q(t) - crit, 0, hi)
+            hi *= 10
+        return np.inf
+
     t_lo, t_hi = solve(st.chi2.ppf(1 - (1 - level) / 2, k - 1)), solve(st.chi2.ppf((1 - level) / 2, k - 1))
     w = 1 / v
     s2 = (k - 1) * w.sum() / (w.sum() ** 2 - (w ** 2).sum())
-    return float(t_lo / (t_lo + s2)), float(t_hi / (t_hi + s2))
+    i2 = lambda t: 1.0 if np.isinf(t) else t / (t + s2)  # noqa: E731
+    return float(i2(t_lo)), float(i2(t_hi))
 
 
 def pool(log_hr, se) -> dict:
@@ -63,4 +74,18 @@ def pool(log_hr, se) -> dict:
     return {"k": int(len(y)), "logHR": float(mu), "se": float(s), "HR": float(np.exp(mu)),
             "lo": float(np.exp(mu - Z * s)), "hi": float(np.exp(mu + Z * s)), "p": float(2 * st.norm.sf(abs(mu / s))),
             "tau2": t2, "Q": q, "Q_p": qp, "I2": i2, "I2_lo": i2_lo, "I2_hi": i2_hi,
-            "weights": (w / w.sum()).tolist()}
+            **hksj(y, v, t2), "weights": (w / w.sum()).tolist()}
+
+
+def hksj(y, v, tau2: float) -> dict:
+    """Modified HKSJ interval: variance scaled by q* = max(1, Q_w / (k - 1)) and a t distribution with k - 1 degrees
+    of freedom, so the interval is never narrower than the REML interval (wide with few cohorts)."""
+    k = len(y)
+    if k < 2:
+        return {"HKSJ_lo": np.nan, "HKSJ_hi": np.nan, "HKSJ_p": np.nan}
+    w = 1 / (v + tau2)
+    mu = (w * y).sum() / w.sum()
+    se = np.sqrt(max(1.0, (w * (y - mu) ** 2).sum() / (k - 1)) / w.sum())
+    t = st.t.ppf(0.975, k - 1)
+    return {"HKSJ_lo": float(np.exp(mu - t * se)), "HKSJ_hi": float(np.exp(mu + t * se)),
+            "HKSJ_p": float(2 * st.t.sf(abs(mu / se), k - 1))}

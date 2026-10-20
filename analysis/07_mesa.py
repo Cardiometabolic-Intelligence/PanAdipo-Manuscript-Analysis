@@ -1,9 +1,9 @@
 """Cross-sectional associations of PanAdipo with cardiometabolic biomarkers in MESA Exam 6 (Figure 4; Supplemental
-Table 8; Central Illustration).
+Table 9; Central Illustration).
 
 Standardized beta per SD of log(PanAdipo) from OLS models M1-M4 (panadipo.mesa) in the full cohort, the normoglycemic
 subgroup (dm036c == 0: fasting glucose <100 mg/dL without treated diabetes), and participants with BMI <25 kg/m².
-Supplemental Table 8 shows M2, M3 (WHR instead of BMI), and M4 in the full cohort and M2 in the subgroups; the Central
+Supplemental Table 9 shows M2, M3 (WHR instead of BMI), and M4 in the full cohort and M2 in the subgroups; the Central
 Illustration shows M2 and M3.
 Log HOMA-IR is the primary biomarker; the others are secondary or exploratory and not adjusted for multiplicity.
 

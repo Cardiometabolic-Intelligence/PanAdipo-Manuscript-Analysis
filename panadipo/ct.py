@@ -15,10 +15,10 @@ HEART = ["myocardium_volume", "lv_volume", "rv_volume", "la_volume", "ra_volume"
 # Supplemental Table 1 / Figure 2B measures: column -> label
 VOLUMES = {
     "eat_volume_heart_indexed": "EAT volume indexed to total heart volume",
+    "eat_volume_bsa_indexed": "EAT volume indexed to BSA",
     "eat_fraction_pericardium": "EAT fraction of pericardial sac volume",
     "eat_volume": "EAT volume",
     "paracardial_volume": "Paracardial adipose tissue volume",
-    "paracardial_fraction_mediastinum": "Paracardial fraction of mediastinum",
     "thoracic_volume": "Thoracic adipose tissue (ThAT; epicardial + paracardial) volume",
     "sat_volume": "Subcutaneous adipose tissue volume",
     "imat_volume": "Intermuscular adipose tissue volume",
@@ -40,12 +40,32 @@ def primary_sample(pairs: pd.DataFrame, max_days: int = 365) -> pd.DataFrame:
 
 
 def add_derived(d: pd.DataFrame, heart_ml=(200, 1500), min_structure_ml: float = 10) -> pd.DataFrame:
-    """ThAT volume and EAT volume / total heart volume (missing for implausible cardiac segmentations)."""
+    """ThAT volume, total heart volume, EAT volume / total heart volume (missing for implausible cardiac
+    segmentations, which are excluded rather than corrected), and EAT volume / BSA (mL/m², when `bsa` is given)."""
     hv = d[HEART].apply(pd.to_numeric, errors="coerce")
     total = hv.sum(axis=1, min_count=len(HEART))
     plausible = (hv.min(axis=1) >= min_structure_ml) & total.between(*heart_ml)
-    return d.assign(thoracic_volume=d["eat_volume"] + d["paracardial_volume"],
-                    eat_volume_heart_indexed=(d["eat_volume"] / total).where(plausible))
+    out = d.assign(thoracic_volume=d["eat_volume"] + d["paracardial_volume"], heart_volume=total,
+                   eat_volume_heart_indexed=(d["eat_volume"] / total).where(plausible))
+    if "bsa" in d:
+        out["eat_volume_bsa_indexed"] = d["eat_volume"] / pd.to_numeric(d["bsa"], errors="coerce")
+    return out
+
+
+def qc_flow(d: pd.DataFrame, heart_ml=(200, 1500), min_structure_ml: float = 10) -> pd.DataFrame:
+    """Patients excluded from the heart-indexed analyses by the segmentation plausibility checks (after add_derived)."""
+    hv = d[HEART].apply(pd.to_numeric, errors="coerce")
+    eat, miss = d["eat_volume"].notna(), hv.isna().any(axis=1)
+    small = ~miss & (hv.min(axis=1) < min_structure_ml)
+    outside = ~miss & ~small & ~d["heart_volume"].between(*heart_ml)
+    bmi = d["eat_volume_heart_indexed"].notna() & d[["age", "female", "bmi"]].notna().all(axis=1)
+    rows = [("Primary held-out sample (one pair per patient)", len(d)), ("Missing EAT volume", int((~eat).sum())),
+            ("Any heart structure not segmented", int((eat & miss).sum())),
+            (f"Any heart structure <{min_structure_ml:g} mL", int((eat & small).sum())),
+            (f"Total heart volume outside {heart_ml[0]}-{heart_ml[1]:,} mL", int((eat & outside).sum())),
+            ("EAT volume indexed to heart volume available", int(d["eat_volume_heart_indexed"].notna().sum())),
+            ("... and age, sex, and BMI available (R² and Figure 3 sample)", int(bmi.sum()))]
+    return pd.DataFrame(rows, columns=["step", "patients"])
 
 
 def age_group(age: pd.Series, cuts=(50, 65)) -> pd.Series:

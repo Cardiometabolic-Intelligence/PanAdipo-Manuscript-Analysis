@@ -36,7 +36,14 @@ def tte_test(rng, n=1500):
     p = people(n, rng)
     studies = p.loc[p.index.repeat(rng.integers(1, 3, n))].reset_index(drop=True)
     studies["study_id"] = [f"S{i:06d}" for i in range(len(studies))]
-    studies["label"] = (rng.random(len(studies)) < sigmoid(-6 + 1.6 * studies["z"])).astype(int)
+    studies["study_date"] = pd.Timestamp("2022-07-01") + pd.to_timedelta(rng.integers(0, 180, len(studies)), unit="D")
+    # the same report entries retrieved from the reporting system (most studies) and the imaging data warehouse
+    finding = rng.random(len(studies)) < sigmoid(-6 + 1.6 * studies["z"])
+    studies["text_reporting_system"] = rng.random(len(studies)) < 0.85
+    studies["text_warehouse"] = ~studies["text_reporting_system"] | (rng.random(len(studies)) < 0.1)
+    studies["label_reporting_system"] = (finding & studies["text_reporting_system"]).astype(int)
+    studies["label_warehouse"] = (finding & studies["text_warehouse"]).astype(int)
+    studies["label"] = (studies["label_reporting_system"] | studies["label_warehouse"]).astype(int)
     for f in FEATURES:
         true = 0.25 * studies["z"] + rng.standard_normal(len(studies))
         measured = true + 0.4 * rng.standard_normal(len(studies))
@@ -54,7 +61,12 @@ def tte_test(rng, n=1500):
     for c in [c for c in studies if c.startswith("panecho_")]:
         dev[c] = (0.25 if c[8:] in FEATURES else 0.1) * dev["z"] + rng.standard_normal(len(dev))
     drop = ["z"]
-    return clips.drop(columns=drop), studies.drop(columns=drop + ["score"]), dev.drop(columns=drop + ["score"])
+    both = rng.random(len(dev)) < 0.4                              # development studies with text in both sources
+    dev_src = dev[["patient_id", "study_id", "label"]].assign(
+        text_reporting_system=True, text_warehouse=both, label_reporting_system=dev["label"],
+        label_warehouse=dev["label"].where(both, 0))
+    return (clips.drop(columns=drop), studies.drop(columns=drop + ["score"]), dev.drop(columns=drop + ["score"]),
+            dev_src)
 
 
 def ct_pairs(rng, n=2500):
@@ -81,7 +93,8 @@ def ct_pairs(rng, n=2500):
     d["age_at_echo"] = d["age"] + d["interval_days"] / 365.25
     d["bmi_at_echo"] = d["bmi"].where(rng.random(n) > 0.05)
     d["eat_fraction_pericardium"] = d["eat_volume"] / d["pericardium_volume"]
-    d["paracardial_fraction_mediastinum"] = np.clip(0.3 + 0.03 * z + rng.normal(0, 0.05, n), 0, 1)
+    height_m = rng.normal(1.70, 0.09, n)
+    d["bsa"] = np.sqrt(100 * height_m * d["bmi"] * height_m ** 2 / 3600).round(2)      # Mosteller (cm x kg / 3600)
     extra = d.sample(frac=0.1, random_state=1).assign(interval_days=lambda x: rng.integers(-365, 366, len(x)))
     return pd.concat([d, extra]).drop(columns="z")                 # some patients with several pairs
 
@@ -105,8 +118,12 @@ def mesa(rng, n=1500):
     return d
 
 
-def cohort(rng, n: int, start: str, death_rate: float, mimic: bool = False):
+def cohort(rng, n: int, start: str, death_rate: float, prefix: str, shared: pd.Series | None = None):
     p = people(n, rng)
+    p["patient_id"] = [f"{prefix}{i:06d}" for i in range(n)]
+    if shared is not None:                                          # patients also in another cohort of the system
+        k = min(len(shared), n // 20)
+        p.loc[: k - 1, "patient_id"] = shared.iloc[:k].values
     idx = pd.Timestamp(start) + pd.to_timedelta(rng.integers(0, 365 * 3, n), unit="D")
     d = p.assign(index_date=idx)
     years = lambda rate: np.minimum(rng.exponential(1 / rate, n), 9)   # noqa: E731  (>8 years = never)
@@ -122,9 +139,14 @@ def cohort(rng, n: int, start: str, death_rate: float, mimic: bool = False):
     death = years(death_rate * np.exp(-0.1 * p["z"] + 0.04 * (p["age"] - 65)))
     d["death_date"] = (idx + pd.to_timedelta(death * 365.25, unit="D")).where(death < 8)
     d["last_known_date"] = idx + pd.to_timedelta(rng.uniform(0.2, 6, n) * 365.25, unit="D")
-    d.loc[rng.random(n) < 0.3, "bmi"] = np.nan
-    if mimic:
-        d["alcohol_excluded"] = rng.random(n) < 0.05
+    d["bmi_days"] = rng.normal(5, 40, n).round().clip(-365, 365)        # BMI date minus index date
+    d["bmi_pre_index"] = d["bmi"].where(d["bmi_days"] <= 0)
+    d.loc[rng.random(n) < 0.3, ["bmi", "bmi_days", "bmi_pre_index"]] = np.nan
+    d["alcohol_excluded"] = rng.random(n) < 0.08
+    d["contact_days_1y"] = rng.poisson(np.exp(1.5 + 0.2 * p["z"]))
+    unlinked = rng.random(n) < 0.01                                 # no EHR linkage: no demographics or diagnoses
+    d.loc[unlinked, ["age", "female", "bmi", "bmi_days", "bmi_pre_index"]] = np.nan
+    d.loc[unlinked, [c for c in d if c.endswith("_date") and c != "index_date"]] = pd.NaT
     return d.drop(columns="z")
 
 
@@ -136,13 +158,16 @@ def main() -> None:
     rng = np.random.default_rng(a.seed)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    clips, studies, dev = tte_test(rng)
-    tables = {"tte_test_clips": clips, "tte_test_studies": studies, "dev_case_control": dev, "ct_pairs": ct_pairs(rng),
-              "mesa": mesa(rng),
-              "cohort_ynhhs_tte": cohort(rng, 2000, "2022-07-01", 0.04),
-              "cohort_ynhhs_pocus": cohort(rng, 3000, "2020-01-01", 0.12),
-              "cohort_mimic": cohort(rng, 1500, "2017-01-01", 0.05, mimic=True),
-              "cohort_mesa": cohort(rng, 1500, "2017-01-01", 0.03)}
+    clips, studies, dev, dev_src = tte_test(rng)
+    tte = cohort(rng, 2000, "2022-07-01", 0.04, "T")
+    mesa_cohort = cohort(rng, 1500, "2017-01-01", 0.03, "E").drop(columns=["alcohol_excluded", "contact_days_1y"])
+    mesa_cohort[["age", "female"]] = mesa_cohort[["age", "female"]].fillna({"age": 74.0, "female": 1.0})
+    tables = {"tte_test_clips": clips, "tte_test_studies": studies, "dev_case_control": dev,
+              "dev_label_sources": dev_src, "ct_pairs": ct_pairs(rng), "mesa": mesa(rng),
+              "cohort_ynhhs_tte": tte,
+              "cohort_ynhhs_pocus": cohort(rng, 3000, "2020-01-01", 0.12, "U", shared=tte["patient_id"]),
+              "cohort_mimic": cohort(rng, 1500, "2017-01-01", 0.05, "M"),
+              "cohort_mesa": mesa_cohort}
     for name, df in tables.items():
         df.to_csv(out / f"{name}.csv", index=False)
         print(f"{name}: {len(df):,} rows")

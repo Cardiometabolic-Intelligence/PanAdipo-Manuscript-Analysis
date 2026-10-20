@@ -24,7 +24,9 @@ ICD9 = {
     "hld": ["272.0", "272.1", "272.2", "272.3", "272.4"],
     "masld": ["571.8"],
 }
-# MIMIC-IV: participants with any alcohol-related code are excluded from the MASLD/MASH analyses
+# Participants with any alcohol-related code at any time are excluded from the steatotic liver disease (MASLD/MASH)
+# analyses in all three hospital cohorts (YNHHS: encounter diagnoses, problem list, and medical history; MIMIC-IV:
+# hospital diagnoses)
 ALCOHOL = {9: ["291", "303", "571.0", "571.1", "571.2", "571.3"], 10: ["F10", "K70"]}
 
 # Baseline comorbidities shown in Table 1 (ICD-10 and ICD-9)
@@ -38,7 +40,9 @@ COMORBIDITIES = {
                                     "I74.3", "I74.4", "I74.5", "440.2", "440.3", "440.4", "443", "444"],
 }
 
-ENDPOINTS = {"t2d": "Type 2 diabetes", "htn": "Hypertension", "hld": "Hyperlipidemia", "masld": "MASLD/MASH"}
+# code-defined steatotic liver disease: MASLD/MASH diagnosis codes
+ENDPOINTS = {"t2d": "Type 2 diabetes", "htn": "Hypertension", "hld": "Hyperlipidemia",
+             "masld": "Steatotic liver disease"}
 
 
 def normalize(code) -> str:
@@ -71,7 +75,7 @@ def first_dates(dx: pd.DataFrame, classes: dict[int, dict[str, list[str]]] | Non
 
 
 def alcohol_flag(dx: pd.DataFrame) -> pd.Series:
-    """Patients with any alcohol-related code (used to exclude MIMIC-IV participants from MASLD/MASH analyses)."""
+    """Patients with any alcohol-related code (excluded from the steatotic liver disease analyses)."""
     d = dx.assign(code=dx["icd_code"].map(normalize))
     hit = pd.Series(False, index=d.index)
     for version, prefixes in ALCOHOL.items():
